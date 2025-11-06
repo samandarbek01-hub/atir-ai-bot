@@ -24,7 +24,6 @@ GROK_API_URL = "https://api.x.ai/v1/chat/completions"  # To'g'ri endpoint
 chat_history = {}
 
 def get_grok_response(prompt, user_id):
-    # Multi-turn: oldin xabarlarni qo'shish
     history = chat_history.get(user_id, [])
     messages = history + [{"role": "user", "content": prompt}]
     
@@ -33,28 +32,28 @@ def get_grok_response(prompt, user_id):
         "Content-Type": "application/json"
     }
     json_data = {
-        "model": "grok-beta",  # xAI modeli (2025 da mavjud)
+        "model": "grok-beta",  # TO'G'RI MODEL
         "messages": messages,
-        "max_tokens": 500,  # Ko'proq token
+        "max_tokens": 500,
         "temperature": 0.7
     }
     
     try:
-        response = httpx.post(GROK_API_URL, headers=headers, json=json_data, timeout=30)
+        response = httpx.post("https://api.x.ai/v1/chat/completions", headers=headers, json=json_data, timeout=30)
         response.raise_for_status()
         data = response.json()
-        ai_reply = data['choices'][0]['message']['content']  # To'g'ri format
+        ai_reply = data['choices'][0]['message']['content']  # TO'G'RI FORMAT
         
         # History yangilash
         history.append({"role": "user", "content": prompt})
         history.append({"role": "assistant", "content": ai_reply})
-        chat_history[user_id] = history[-10:]  # Oxirgi 10 xabar (xotira tejash)
+        chat_history[user_id] = history[-10:]
         
         return ai_reply
     except Exception as e:
-        print(f"Grok AI xatoligi: {e}")
-        return "AI javob berishda xatolik yuz berdi. Keyinroq urinib ko'ring."
-
+        print(f"GROK XATOLIGI: {e}")  # LOGDA KO'RINADI
+        return "AI bilan ulanishda xatolik. Keyinroq urinib ko'ring."
+        
 # Webhook route (xavfsizlik uchun token-based)
 @app.route(f'/{TELEGRAM_TOKEN}', methods=['POST'])
 def webhook():
@@ -92,3 +91,4 @@ if __name__ == "__main__":
     # Flask ishga tushirish
     port = int(os.getenv("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
