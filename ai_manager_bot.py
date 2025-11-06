@@ -1,4 +1,4 @@
-# ai_manager_bot.py (YANGI VERSIYA – ADMIN KO‘RSATMA BERADI)
+# ai_manager_bot.py (BUSINESS + ADMIN KO‘RSATMA)
 import os
 import json
 from dotenv import load_dotenv
@@ -21,7 +21,6 @@ openai.api_key = OPENAI_KEY
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# Ma'lumotlarni saqlash
 DATA_FILE = "prompt_store.json"
 
 def load_prompt():
@@ -46,13 +45,13 @@ def cmd_start(m):
     else:
         bot.reply_to(m, "Salom! Men sizning AI yordamchingizman.\nYozing — javob beraman!")
 
-# /setprompt — admin uchun
+# /setprompt
 @bot.message_handler(commands=['setprompt'])
 def cmd_setprompt(m):
     if not is_admin(m.from_user.id):
         bot.reply_to(m, "Bu buyruq faqat admin uchun!")
         return
-    bot.reply_to(m, "Yangi ko‘rsatma yuboring (masalan: 'Bugun atir sotuvini reklama qil'):")
+    bot.reply_to(m, "Yangi ko‘rsatma yuboring:")
     bot.register_next_step_handler(m, save_new_prompt)
 
 def save_new_prompt(m):
@@ -62,26 +61,33 @@ def save_new_prompt(m):
     save_prompt(new_prompt)
     bot.reply_to(m, f"✅ Yangi ko‘rsatma saqlandi:\n\n{new_prompt}")
 
-# Har qanday xabar — AI javob beradi
+# HAR QANDAY XABAR — BUSINESS YOKI ODDIY
 @bot.message_handler(func=lambda m: True)
 def handle_all(m):
+    # Business chatdan kelgan xabarlarni aniqlash
+    if hasattr(m.chat, 'type') and m.chat.type == 'business':
+        user_msg = m.text
+    elif m.chat.type in ['private', 'group', 'supergroup']:
+        user_msg = m.text
+    else:
+        return  # Boshqa turlar uchun javob bermaymiz
+
     system_prompt = load_prompt()
-    user_msg = m.text
 
     full_prompt = f"""
 Ko‘rsatma: {system_prompt}
 Sotuv bot: {SALES_BOT}
 
-Foydalanuvchi xabari: {user_msg}
+Foydalanuvchi: {user_msg}
 
-Javob: qisqa, do'stona, o'zbek tilida, sotuv botga yo'naltiring.
+Javob: o'zbek tilida, do'stona, qisqa, sotuvga yo'naltiring.
 """
 
     try:
         resp = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Siz professional AI yordamchi."},
+                {"role": "system", "content": "Siz professional AI sotuvchi."},
                 {"role": "user", "content": full_prompt}
             ],
             max_tokens=200,
@@ -89,11 +95,19 @@ Javob: qisqa, do'stona, o'zbek tilida, sotuv botga yo'naltiring.
         )
         ai_reply = resp["choices"][0]["message"]["content"].strip()
     except Exception as e:
+        print("OpenAI xato:", e)
         ai_reply = "Kechirasiz, hozir javob bera olmayapman. Keyinroq urinib ko‘ring."
 
-    bot.reply_to(m, ai_reply)
+    # Business chatga javob berish
+    try:
+        if m.chat.type == 'business':
+            bot.send_message(m.chat.id, ai_reply)
+        else:
+            bot.reply_to(m, ai_reply)
+    except Exception as e:
+        print("Javob yuborish xato:", e)
 
-# Flask webhook
+# Webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -105,9 +119,9 @@ def webhook():
 
 @app.route('/')
 def index():
-    return "Bot ishlayapti! Admin: /setprompt"
+    return "Bot ishlayapti!"
 
-# Render uchun
+# Render
 if __name__ == '__main__':
     import os
     port = int(os.environ.get('PORT', 10000))
