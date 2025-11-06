@@ -150,6 +150,8 @@ def index():
 
 # --- Deploy uchun ---
 if __name__ == '__main__':
-    # Railway uchun
-    import threading
-    threading.Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': int(os.environ.get('PORT', 5000))}).start()
+    import os
+    port = int(os.environ.get('PORT', 10000))  # Render PORT ni beradi
+    print(f"Bot ishlayapti... Listening on 0.0.0.0:{port}")
+    app.run(host='0.0.0.0', port=port)
+
