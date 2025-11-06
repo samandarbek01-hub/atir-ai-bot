@@ -1,86 +1,57 @@
 import os
-import telebot
 from flask import Flask, request
-from dotenv import load_dotenv
+import telebot
 import httpx
 
-# 🔹 .env faylni o‘qish
-load_dotenv()
+# .env fayldan o'qish
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+XAI_API_KEY = os.getenv("XAI_API_KEY")  # Grok AI API kaliti
+ADMIN_TELEGRAM_ID = os.getenv("ADMIN_TELEGRAM_ID")
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-ADMIN_ID = os.getenv("ADMIN_TELEGRAM_ID")
-XAI_API_KEY = os.getenv("XAI_API_KEY")
-
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
 app = Flask(__name__)
 
-# 🔹 Grok (xAI) API orqali javob olish funksiyasi
-def get_ai_reply(message_text):
-    try:
-        headers = {
-            "Authorization": f"Bearer {XAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": "grok-beta",  # yoki "grok-2-latest" bo‘lishi mumkin
-            "messages": [
-                {"role": "system", "content": "Sen yordamchi asistentsan, reklama qilma, insondek gapir."},
-                {"role": "user", "content": message_text}
-            ]
-        }
+GROK_API_URL = "https://api.grok.ai/v1/complete"  # Grok AI endpoint
 
-        response = httpx.post("https://api.x.ai/v1/chat/completions", headers=headers, json=data, timeout=30)
-        response.raise_for_status()
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
+# AI javobini olish funksiyasi
+def ask_grok_ai(prompt: str) -> str:
+    headers = {
+        "Authorization": f"Bearer {XAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "prompt": prompt,
+        "model": "grok-mantic-1",  # kerakli model
+        "temperature": 0.7,
+        "max_tokens": 500
+    }
+    with httpx.Client(timeout=30) as client:
+        response = client.post(GROK_API_URL, headers=headers, json=data)
+        if response.status_code == 200:
+            result = response.json()
+            return result.get("text", "AI javobini yaratolmadi.")
+        else:
+            return f"Xatolik {response.status_code}: {response.text}"
 
-    except Exception as e:
-        print("AI xatosi:", e)
-        return "Kechirasiz, hozircha javob bera olmadim 😔"
-
-# 🔹 Oddiy foydalanuvchi xabariga javob
-@bot.message_handler(func=lambda message: True)
-def handle_all_messages(message):
-    user_text = message.text
-
-    # Admin uchun maxsus buyruqlar
-    if str(message.chat.id) == str(ADMIN_ID):
-        if user_text.startswith("/send"):
-            try:
-                _, user_id, msg = user_text.split(" ", 2)
-                bot.send_message(int(user_id), msg)
-                bot.reply_to(message, "✅ Xabar yuborildi!")
-            except:
-                bot.reply_to(message, "❌ Foydalanish: /send <user_id> <xabar>")
-            return
-
-    # Oddiy foydalanuvchilar uchun AI javobi
-    reply = get_ai_reply(user_text)
-    bot.send_message(message.chat.id, reply)
-
-
-# 🔹 Flask orqali Telegram webhookni boshqarish
-@app.route('/', methods=['GET'])
-def index():
-    bot.remove_webhook()
-
-    base_url = os.getenv('RENDER_EXTERNAL_URL', '').strip()
-    if not base_url.startswith("https://"):
-        base_url = f"https://{base_url}"
-
-    webhook_url = f"{base_url}/{TOKEN}"
-    bot.set_webhook(url=webhook_url)
-
-    return f"🤖 Bot webhook o‘rnatildi: {webhook_url}", 200
-
-
-@app.route(f'/{TOKEN}', methods=['POST'])
+# Telegram webhook endpoint
+@app.route("/", methods=["POST"])
 def webhook():
-    json_str = request.get_data(as_text=True)
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
+    json_data = request.get_json()
+    if json_data:
+        update = telebot.types.Update.de_json(json_data)
+        bot.process_new_updates([update])
     return "ok", 200
 
+# Oddiy xabarlarni qabul qilish
+@bot.message_handler(func=lambda m: True)
+def handle_message(message):
+    bot.send_chat_action(message.chat.id, "typing")
+    ai_reply = ask_grok_ai(message.text)
+    bot.reply_to(message, ai_reply)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    # Render.com URL ni .env ga qo'y
+    webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/"
+    bot.remove_webhook()
+    bot.set_webhook(url=webhook_url)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
