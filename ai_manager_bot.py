@@ -1,26 +1,28 @@
-# ai_manager_bot.py (GROK API + BUSINESS + ADMIN KO'RSATMA)
+# ai_manager_bot.py (GROK + OPENAI SDK TUZATILGAN)
 import os
 import json
 from dotenv import load_dotenv
 import telebot
 from telebot import types
-from openai import OpenAI  # Grok OpenAI bilan mos
+from openai import OpenAI
 from flask import Flask, request
+import httpx  # <-- Import qo'shildi
 
 load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-XAI_API_KEY = os.getenv("XAI_API_KEY")  # Yangi kalit nomi
+XAI_API_KEY = os.getenv("XAI_API_KEY")  # Grok kaliti
 ADMIN_ID = int(os.getenv("ADMIN_TELEGRAM_ID", "0"))
 SALES_BOT = os.getenv("SALES_BOT_USERNAME", "@beautygateuz_bot")
 
 if not TOKEN or not XAI_API_KEY or ADMIN_ID == 0:
     raise SystemExit("Iltimos .env faylini to'ldiring! XAI_API_KEY qo'shing.")
 
-# Grok client (OpenAI SDK bilan)
+# Grok client (proxies muammosini hal qilish uchun http_client)
 client = OpenAI(
     api_key=XAI_API_KEY,
-    base_url="https://api.x.ai/v1"  # xAI endpoint
+    base_url="https://api.x.ai/v1",
+    http_client=httpx.Client(proxies=None)  # <-- Proxies ni None qilish
 )
 
 bot = telebot.TeleBot(TOKEN)
@@ -69,7 +71,6 @@ def save_new_prompt(m):
 # HAR QANDAY XABAR — GROK JAVOBI
 @bot.message_handler(func=lambda m: True)
 def handle_all(m):
-    # Business yoki oddiy chat
     if m.chat.type not in ['private', 'business', 'group', 'supergroup']:
         return
 
@@ -87,7 +88,7 @@ Javob: o'zbek tilida, do'stona, qisqa, sotuvga yo'naltiring. Real vaqt ma'lumotl
 
     try:
         resp = client.chat.completions.create(
-            model="grok-3-mini",  # Arzon va tez model (yoki "grok-3" kuchliroq uchun)
+            model="grok-3-mini",  # Arzon va tez (yoki "grok-3")
             messages=[
                 {"role": "system", "content": "Siz Grok AI, professional sotuv menejeri."},
                 {"role": "user", "content": full_prompt}
@@ -100,7 +101,6 @@ Javob: o'zbek tilida, do'stona, qisqa, sotuvga yo'naltiring. Real vaqt ma'lumotl
         print("GROK XATOLIK:", str(e))  # Logs uchun
         ai_reply = "Kechirasiz, hozir javob bera olmayapman. Keyinroq urinib ko'ring."
 
-    # Javob yuborish
     try:
         if m.chat.type == 'business':
             bot.send_message(m.chat.id, ai_reply)
