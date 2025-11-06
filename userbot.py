@@ -1,37 +1,51 @@
+# USERBOT + PULT (1 fayl ichida)
 from pyrogram import Client, filters
 import openai
 import os
 
-# Render Variables dan olish
+# Render Variables
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 PHONE = os.getenv("PHONE")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+PULT_BOT_TOKEN = os.getenv("PULT_BOT_TOKEN")  # yangi
+openai.api_key = os.getenv("OPENAI_KEY")
 
-openai.api_key = OPENAI_KEY
+app = Client("me", api_id=API_ID, api_hash=API_HASH, phone_number=PHONE)
+pult = Client("pult", bot_token=PULT_BOT_TOKEN)  # pult bot
 
-app = Client("my_account", api_id=API_ID, api_hash=API_HASH, phone_number=PHONE)
+# Vazifa (default)
+TASK = "Sen akasiya atir sotuv menejerisan. Har javobga chegirma qo‘sh."
 
-SALES_BOT = "@beautygateuz_bot"
+# AI javob funksiyasi
+async def ai(text):
+    resp = openai.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "system", "content": TASK},
+                  {"role": "user", "content": text}]
+    )
+    return resp.choices[0].message.content
 
-async def ai_response(text):
-    try:
-        resp = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Sen akasiya atir sotuv menejerisan. Do'stona, o'zbek tilida javob ber. Har doim @beautygateuz_bot ga yo'naltir."},
-                {"role": "user", "content": text}
-            ],
-            max_tokens=200
-        )
-        return resp.choices[0].message.content
-    except:
-        return "Kechirasiz, hozir javob bera olmayapman."
+# 1. Odamdan xabar → AI javob beradi
+@app.on_message(filters.private & filters.incoming & ~filters.me & ~filters.bot)
+async def from_human(client, message):
+    reply = await ai(message.text)
+    await message.reply(reply + "\n\n📦 Buyurtma: @beautygateuz_bot")
 
-@app.on_message(filters.private & ~filters.me)
-async def handle_private(client, message):
-    ai_reply = await ai_response(message.text)
-    await message.reply(ai_reply + f"\n\nBuyurtma uchun: {SALES_BOT}")
+# 2. Pult botga vazifa berish
+@pult.on_message(filters.private & filters.command("task"))
+async def new_task(client, message):
+    global TASK
+    TASK = message.text.partition(" ")[2]
+    await message.reply(f"✅ Yangi vazifa:\n{TASK}")
 
-print("Userbot ishlayapti...")
+# 3. Pult botga kod yuborish
+@pult.on_message(filters.private & filters.command("code"))
+async def get_code(client, message):
+    code = message.text.partition(" ")[2]
+    # Render logs ga yozish uchun faylga saqlaymiz
+    with open("code.txt", "w") as f:
+        f.write(code)
+    await message.reply("✅ Kod qabul qilindi! Userbot davom etyapti.")
+
+print("Userbot + Pult ishlayapti...")
 app.run()
