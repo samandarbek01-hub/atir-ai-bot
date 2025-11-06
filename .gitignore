@@ -1,4 +1,3 @@
 .env
-__pycache__
-pending_info.json
-projects_store.json
+__pycache__/
+*.pyc
