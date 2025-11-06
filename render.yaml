@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: ai-manager-bot
+    env: python
+    region: frankfurt
+    plan: starter  # yoki "pro" bo‘lsa, Always On kafolatlanadi
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python ai_manager_bot_multi_turn.py"
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: XAI_API_KEY
+        sync: false
+      - key: ADMIN_TELEGRAM_ID
+        sync: false
+    autoDeploy: true
+    scaling:
+      minInstances: 1
+      maxInstances: 1
