@@ -3,55 +3,60 @@ from flask import Flask, request
 import telebot
 import httpx
 
-# .env fayldan o'qish
+# ENV o'zgaruvchilarini o'qish
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-XAI_API_KEY = os.getenv("XAI_API_KEY")  # Grok AI API kaliti
-ADMIN_TELEGRAM_ID = os.getenv("ADMIN_TELEGRAM_ID")
+XAI_API_KEY = os.getenv("XAI_API_KEY")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 app = Flask(__name__)
 
-GROK_API_URL = "https://api.grok.ai/v1/complete"  # Grok AI endpoint
+# Grok AI endpointi
+GROK_API_URL = "https://api.grok.ai/v1/completions"  # o'zingizning endpoint bilan almashtiring
 
-# AI javobini olish funksiyasi
-def ask_grok_ai(prompt: str) -> str:
+def get_grok_response(prompt):
     headers = {
         "Authorization": f"Bearer {XAI_API_KEY}",
         "Content-Type": "application/json"
     }
-    data = {
+    json_data = {
+        "model": "gpt-4o-mini",  # kerakli model nomini kiriting
         "prompt": prompt,
-        "model": "grok-mantic-1",  # kerakli model
-        "temperature": 0.7,
-        "max_tokens": 500
+        "max_tokens": 200
     }
-    with httpx.Client(timeout=30) as client:
-        response = client.post(GROK_API_URL, headers=headers, json=data)
-        if response.status_code == 200:
-            result = response.json()
-            return result.get("text", "AI javobini yaratolmadi.")
-        else:
-            return f"Xatolik {response.status_code}: {response.text}"
 
-# Telegram webhook endpoint
+    try:
+        response = httpx.post(GROK_API_URL, headers=headers, json=json_data, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        # Grok AI javobini olish (data formatiga qarab o'zgartirish kerak bo'lishi mumkin)
+        return data.get("text") or data.get("output") or "AI javobini olishda xato"
+    except Exception as e:
+        print("Grok AI xatoligi:", e)
+        return "AI javobini olishda xatolik yuz berdi."
+
+# Webhook route
 @app.route("/", methods=["POST"])
 def webhook():
-    json_data = request.get_json()
-    if json_data:
-        update = telebot.types.Update.de_json(json_data)
+    try:
+        update = telebot.types.Update.de_json(request.get_json())
         bot.process_new_updates([update])
-    return "ok", 200
+    except Exception as e:
+        print("Webhook xatoligi:", e)
+    return "OK", 200
 
-# Oddiy xabarlarni qabul qilish
-@bot.message_handler(func=lambda m: True)
+# Bot message handler
+@bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    bot.send_chat_action(message.chat.id, "typing")
-    ai_reply = ask_grok_ai(message.text)
-    bot.reply_to(message, ai_reply)
+    print("User so‘rovi:", message.text)
+    response_text = get_grok_response(message.text)
+    print("AI javobi:", response_text)
+    bot.send_message(message.chat.id, response_text)
 
 if __name__ == "__main__":
-    # Render.com URL ni .env ga qo'y
-    webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/"
+    # Render.com yoki boshqa hosting URL sini qo‘shing
+    webhook_url = "https://atir-ai-bot-1.onrender.com/"
     bot.remove_webhook()
     bot.set_webhook(url=webhook_url)
+
+    # Flask app ishga tushurish
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
