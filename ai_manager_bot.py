@@ -1,4 +1,4 @@
-# ai_manager_bot.py (Business Account moslashgan)
+# ai_manager_bot.py (Admin boshqaruv + tabiiy AI)
 import os
 import json
 from dotenv import load_dotenv
@@ -9,15 +9,17 @@ import httpx
 
 load_dotenv()
 
+# ================== Konfiguratsiya ==================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 XAI_API_KEY = os.getenv("XAI_API_KEY")
 ADMIN_ID = int(os.getenv("ADMIN_TELEGRAM_ID", "0"))
-SALES_BOT = os.getenv("SALES_BOT_USERNAME", "@beautygateuz_bot")
 
 if not TOKEN or not XAI_API_KEY or ADMIN_ID == 0:
     raise SystemExit("Xato: .env faylini to'ldiring!")
 
-# Grok client
+DATA_FILE = "prompt_store.json"
+
+# ================== Grok Client ==================
 try:
     client = OpenAI(
         api_key=XAI_API_KEY,
@@ -32,11 +34,16 @@ except Exception as e:
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-DATA_FILE = "prompt_store.json"
-
+# ================== Helper Functions ==================
 def load_prompt():
     if not os.path.exists(DATA_FILE):
-        return "Siz professional sotuvchi. Do'stona, qisqa javob bering. Har doim sotuv botga yo'naltiring."
+        # Default prompt
+        return (
+            "Siz professional sotuvchi AI. Foydalanuvchiga do'stona va tabiiy javob bering. "
+            "Foydalanuvchi mahsulot, aksiya yoki xarid haqida so‘rasa, aniq va sodda javob bering. "
+            "Foydalanuvchini majburlamay, faqat kerak bo‘lsa sotuvga yo‘naltiring. "
+            "Foydalanuvchiga g‘oyib reklama qilmasdan, tabiiy suhbat qiling."
+        )
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
         return data.get("prompt", "")
@@ -48,21 +55,20 @@ def save_prompt(prompt):
 def is_admin(user_id):
     return int(user_id) == ADMIN_ID
 
-# /start
+# ================== Bot Commands ==================
 @bot.message_handler(commands=['start'])
 def cmd_start(m):
     if is_admin(m.from_user.id):
-        bot.send_message(m.chat.id, "Salom, admin!\n/setprompt — yangi ko‘rsatma berish")
+        bot.send_message(m.chat.id, "Salom, admin!\n/setprompt — AI xulqini va mahsulot ma’lumotlarini yangilash")
     else:
-        bot.send_message(m.chat.id, "Salom! Men sizning AI yordamchingizman.\nYozing — javob beraman!")
+        bot.send_message(m.chat.id, "Salom! Men sizning AI yordamchingizman.\nSavolingizni yozing — javob beraman!")
 
-# /setprompt
 @bot.message_handler(commands=['setprompt'])
 def cmd_setprompt(m):
     if not is_admin(m.from_user.id):
         bot.send_message(m.chat.id, "Bu buyruq faqat admin uchun!")
         return
-    bot.send_message(m.chat.id, "Yangi ko‘rsatma yuboring:")
+    bot.send_message(m.chat.id, "Yangi ko‘rsatma/prompt yuboring (mahsulot, aksiya va AI xulqi uchun):")
     bot.register_next_step_handler(m, save_new_prompt)
 
 def save_new_prompt(m):
@@ -72,7 +78,7 @@ def save_new_prompt(m):
     save_prompt(new_prompt)
     bot.send_message(m.chat.id, f"Yangi ko‘rsatma saqlandi:\n\n{new_prompt}")
 
-# HAR QANDAY XABAR
+# ================== Foydalanuvchi xabarlarini AI bilan ishlash ==================
 @bot.message_handler(func=lambda m: True)
 def handle_all(m):
     if m.chat.type not in ['private', 'group', 'supergroup']:
@@ -81,16 +87,7 @@ def handle_all(m):
     user_msg = m.text
     system_prompt = load_prompt()
 
-    full_prompt = f"""
-Ko‘rsatma: {system_prompt}
-Sotuv bot: {SALES_BOT}
-
-Foydalanuvchi: {user_msg}
-
-Javob: o'zbek tilida, do'stona, qisqa, sotuvga yo'naltiring.
-"""
-
-    # Grok javob
+    # Grok Chat so‘rovi
     if client is None:
         ai_reply = "Kechirasiz, AI xizmati hozir ishlamayapti."
     else:
@@ -98,24 +95,24 @@ Javob: o'zbek tilida, do'stona, qisqa, sotuvga yo'naltiring.
             resp = client.chat.completions.create(
                 model="grok-3-mini",
                 messages=[
-                    {"role": "system", "content": "Siz professional AI sotuvchi."},
-                    {"role": "user", "content": full_prompt}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_msg}
                 ],
-                max_tokens=200,
-                temperature=0.7
+                max_tokens=250,
+                temperature=0.8
             )
             ai_reply = resp.choices[0].message.content.strip()
         except Exception as e:
             print("GROK XATOLIK:", str(e))
             ai_reply = "Kechirasiz, hozir javob bera olmayapman."
 
-    # Javob yuborish (hamma chatlarda ishlaydi)
+    # Javob yuborish
     try:
         bot.send_message(m.chat.id, ai_reply)
     except Exception as e:
         print("Javob yuborish xato:", e)
 
-# Webhook
+# ================== Webhook ==================
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -129,6 +126,7 @@ def webhook():
 def index():
     return "Grok AI bot ishlayapti! Admin: /setprompt"
 
+# ================== Run ==================
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     print(f"Grok bot ishlayapti... Listening on 0.0.0.0:{port}")
