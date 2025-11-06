@@ -1,16 +1,14 @@
-# ai_manager_bot.py (YANGI VERSIYA – WEBHOOK + BUSINESS UCHUN)
+# ai_manager_bot.py (YANGI VERSIYA – ADMIN KO‘RSATMA BERADI)
 import os
 import json
-import time
 from dotenv import load_dotenv
 import telebot
 from telebot import types
 import openai
-from flask import Flask, request  # Webhook uchun
+from flask import Flask, request
 
 load_dotenv()
 
-# .env dan olish
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 ADMIN_ID = int(os.getenv("ADMIN_TELEGRAM_ID", "0"))
@@ -21,119 +19,81 @@ if not TOKEN or not OPENAI_KEY or ADMIN_ID == 0:
 
 openai.api_key = OPENAI_KEY
 bot = telebot.TeleBot(TOKEN)
-
-# Flask server
 app = Flask(__name__)
-DATA_FILE = "projects_store.json"
 
-# --- Data helpers ---
-def load_data():
+# Ma'lumotlarni saqlash
+DATA_FILE = "prompt_store.json"
+
+def load_prompt():
     if not os.path.exists(DATA_FILE):
-        return {"projects": {}}
+        return "Siz professional sotuvchi. Do'stona, qisqa javob bering. Har doim sotuv botga yo'naltiring."
     with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+        return data.get("prompt", "")
 
-def save_data(data):
+def save_prompt(prompt):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump({"prompt": prompt}, f, ensure_ascii=False, indent=2)
 
 def is_admin(user_id):
     return int(user_id) == ADMIN_ID
 
-# --- OpenAI ---
-def ask_openai_system(prompt, max_tokens=300):
+# /start
+@bot.message_handler(commands=['start'])
+def cmd_start(m):
+    if is_admin(m.from_user.id):
+        bot.reply_to(m, "Salom, admin!\n/setprompt — yangi ko‘rsatma berish")
+    else:
+        bot.reply_to(m, "Salom! Men sizning AI yordamchingizman.\nYozing — javob beraman!")
+
+# /setprompt — admin uchun
+@bot.message_handler(commands=['setprompt'])
+def cmd_setprompt(m):
+    if not is_admin(m.from_user.id):
+        bot.reply_to(m, "Bu buyruq faqat admin uchun!")
+        return
+    bot.reply_to(m, "Yangi ko‘rsatma yuboring (masalan: 'Bugun atir sotuvini reklama qil'):")
+    bot.register_next_step_handler(m, save_new_prompt)
+
+def save_new_prompt(m):
+    if not is_admin(m.from_user.id):
+        return
+    new_prompt = m.text.strip()
+    save_prompt(new_prompt)
+    bot.reply_to(m, f"✅ Yangi ko‘rsatma saqlandi:\n\n{new_prompt}")
+
+# Har qanday xabar — AI javob beradi
+@bot.message_handler(func=lambda m: True)
+def handle_all(m):
+    system_prompt = load_prompt()
+    user_msg = m.text
+
+    full_prompt = f"""
+Ko‘rsatma: {system_prompt}
+Sotuv bot: {SALES_BOT}
+
+Foydalanuvchi xabari: {user_msg}
+
+Javob: qisqa, do'stona, o'zbek tilida, sotuv botga yo'naltiring.
+"""
+
     try:
         resp = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Siz professional sotuv menejeri. Qisqa, do'stona, o'zbek tilida javob bering. Har doim sotuv botga yo'naltiring."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": "Siz professional AI yordamchi."},
+                {"role": "user", "content": full_prompt}
             ],
-            max_tokens=max_tokens,
-            temperature=0.3
+            max_tokens=200,
+            temperature=0.7
         )
-        return resp["choices"][0]["message"]["content"].strip()
+        ai_reply = resp["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        print("OpenAI error:", e)
-        return "Kechirasiz, hozir AI javob bera olmayapti. Iltimos keyinroq urining."
+        ai_reply = "Kechirasiz, hozir javob bera olmayapman. Keyinroq urinib ko‘ring."
 
-# --- Bot commands ---
-@bot.message_handler(commands=['start'])
-def cmd_start(m):
-    txt = ("Salom! Men sizning AI-Assistentingizman.\n\n"
-           "Foydalanuvchi sifatida:\n"
-           "- /info <project> — loyiha haqida\n"
-           "- /help — yordam\n\n"
-           "Admin: /addproject")
-    bot.reply_to(m, txt)
+    bot.reply_to(m, ai_reply)
 
-@bot.message_handler(commands=['help', 'info', 'projects', 'addproject', 'setinfo', 'setredirect', 'setadmin'])
-def handle_commands(m):
-    # Barcha komandalarni bu yerga yo'naltiramiz
-    text = m.text
-    if text.startswith("/info"):
-        parts = text.split(maxsplit=1)
-        name = parts[1] if len(parts) > 1 else ""
-        if not name:
-            bot.reply_to(m, "Iltimos: /info <project_name>")
-            return
-        data = load_data()
-        proj = data.get("projects", {}).get(name)
-        if not proj:
-            bot.reply_to(m, f"'{name}' topilmadi.")
-            return
-        prompt = f"Loyiha: {name}\nMa'lumot: {proj.get('info','')}\nFoydalanuvchi: {m.from_user.first_name}\nJavob: qisqa, do'stona, 3 afzallik, sotuv botga yo'naltir: {proj.get('sales_bot', SALES_BOT)}"
-        ai = ask_openai_system(prompt)
-        bot.reply_to(m, ai)
-
-    elif text.startswith("/addproject"):
-        if not is_admin(m.from_user.id): 
-            bot.reply_to(m, "Faqat admin!")
-            return
-        parts = text.split(maxsplit=1)
-        name = parts[1] if len(parts) > 1 else ""
-        if not name:
-            bot.reply_to(m, "/addproject <name>")
-            return
-        data = load_data()
-        data["projects"][name] = {"info": "", "sales_bot": SALES_BOT, "created_at": time.time()}
-        save_data(data)
-        bot.reply_to(m, f"✅ '{name}' yaratildi. /setinfo {name}")
-
-    # Boshqa admin komandalar (qisqartirildi, kerak bo'lsa qo'shing)
-    else:
-        bot.reply_to(m, "Noma'lum buyruq. /help")
-
-# --- Oddiy matn xabarlar ---
-@bot.message_handler(func=lambda m: True)
-def handle_text(m):
-    if os.path.exists("pending_info.json"):
-        with open("pending_info.json", "r") as f:
-            pend = json.load(f)
-        if pend["admin"] == m.from_user.id:
-            project = pend["project"]
-            data = load_data()
-            data["projects"][project]["info"] = m.text
-            save_data(data)
-            os.remove("pending_info.json")
-            bot.reply_to(m, f"✅ '{project}' uchun ma'lumot saqlandi.")
-            return
-
-    data = load_data()
-    projects = list(data["projects"].keys())
-    if len(projects) == 1:
-        p = projects[0]
-        proj = data["projects"][p]
-        prompt = f"Foydalanuvchi: {m.text}\nLoyiha: {p}\nMa'lumot: {proj.get('info','')}\nJavob: do'stona, 2 afzallik, sotuv botga yo'naltir: {proj.get('sales_bot', SALES_BOT)}"
-        ai = ask_openai_system(prompt)
-        bot.reply_to(m, ai)
-    else:
-        kb = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-        for p in projects:
-            kb.add(p)
-        bot.send_message(m.chat.id, "Qaysi loyiha haqida?", reply_markup=kb)
-
-# --- Webhook route ---
+# Flask webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
@@ -141,17 +101,15 @@ def webhook():
         update = telebot.types.Update.de_json(json_string)
         bot.process_new_updates([update])
         return '', 200
-    else:
-        return 'Invalid', 403
+    return 'Invalid', 403
 
 @app.route('/')
 def index():
-    return "Bot ishlayapti!"
+    return "Bot ishlayapti! Admin: /setprompt"
 
-# --- Deploy uchun ---
+# Render uchun
 if __name__ == '__main__':
     import os
-    port = int(os.environ.get('PORT', 10000))  # Render PORT ni beradi
+    port = int(os.environ.get('PORT', 10000))
     print(f"Bot ishlayapti... Listening on 0.0.0.0:{port}")
     app.run(host='0.0.0.0', port=port)
-
