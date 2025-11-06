@@ -1,0 +1,6 @@
+{
+  "build": {
+    "builder": "paketo/buildpack-python"
+  },
+  "start": "python ai_manager_bot.py"
+}
