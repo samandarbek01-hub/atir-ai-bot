@@ -1,15 +1,13 @@
-# ai_manager_bot.py (Admin boshqaruv + tabiiy AI)
+# ai_manager_bot_multi_turn.py
 import os
 import json
 from dotenv import load_dotenv
 import telebot
 from openai import OpenAI
-from flask import Flask, request
 import httpx
 
 load_dotenv()
 
-# ================== Konfiguratsiya ==================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 XAI_API_KEY = os.getenv("XAI_API_KEY")
 ADMIN_ID = int(os.getenv("ADMIN_TELEGRAM_ID", "0"))
@@ -19,7 +17,7 @@ if not TOKEN or not XAI_API_KEY or ADMIN_ID == 0:
 
 DATA_FILE = "prompt_store.json"
 
-# ================== Grok Client ==================
+# Grok Client
 try:
     client = OpenAI(
         api_key=XAI_API_KEY,
@@ -32,12 +30,10 @@ except Exception as e:
     client = None
 
 bot = telebot.TeleBot(TOKEN)
-app = Flask(__name__)
 
-# ================== Helper Functions ==================
+# ================= Helper Functions =================
 def load_prompt():
     if not os.path.exists(DATA_FILE):
-        # Default prompt
         return (
             "Siz professional sotuvchi AI. Foydalanuvchiga do'stona va tabiiy javob bering. "
             "Foydalanuvchi mahsulot, aksiya yoki xarid haqida so‘rasa, aniq va sodda javob bering. "
@@ -55,7 +51,22 @@ def save_prompt(prompt):
 def is_admin(user_id):
     return int(user_id) == ADMIN_ID
 
-# ================== Bot Commands ==================
+# ================= Chat History =================
+# Foydalanuvchi ID bo‘yicha xabarlar ro‘yxati
+user_histories = {}
+
+def add_to_history(user_id, role, content):
+    if user_id not in user_histories:
+        user_histories[user_id] = []
+    user_histories[user_id].append({"role": role, "content": content})
+    # Maksimal 10 xabarni saqlash
+    if len(user_histories[user_id]) > 10:
+        user_histories[user_id].pop(0)
+
+def get_history(user_id):
+    return user_histories.get(user_id, [])
+
+# ================= Bot Commands =================
 @bot.message_handler(commands=['start'])
 def cmd_start(m):
     if is_admin(m.from_user.id):
@@ -78,56 +89,41 @@ def save_new_prompt(m):
     save_prompt(new_prompt)
     bot.send_message(m.chat.id, f"Yangi ko‘rsatma saqlandi:\n\n{new_prompt}")
 
-# ================== Foydalanuvchi xabarlarini AI bilan ishlash ==================
+# ================= Foydalanuvchi xabarlarini AI bilan ishlash =================
 @bot.message_handler(func=lambda m: True)
 def handle_all(m):
-    if m.chat.type not in ['private', 'group', 'supergroup']:
-        return
-
     user_msg = m.text
-    system_prompt = load_prompt()
+    user_id = m.from_user.id
+    print(f"[LOG] Received message from {user_id}: {user_msg}")
 
-    # Grok Chat so‘rovi
+    system_prompt = load_prompt()
+    add_to_history(user_id, "user", user_msg)
+
+    messages = [{"role": "system", "content": system_prompt}] + get_history(user_id)
+
     if client is None:
         ai_reply = "Kechirasiz, AI xizmati hozir ishlamayapti."
     else:
         try:
             resp = client.chat.completions.create(
                 model="grok-3-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_msg}
-                ],
+                messages=messages,
                 max_tokens=250,
                 temperature=0.8
             )
             ai_reply = resp.choices[0].message.content.strip()
         except Exception as e:
-            print("GROK XATOLIK:", str(e))
+            print("[GROK XATO]", e)
             ai_reply = "Kechirasiz, hozir javob bera olmayapman."
 
-    # Javob yuborish
+    add_to_history(user_id, "assistant", ai_reply)
+
     try:
-        bot.send_message(m.chat.id, ai_reply)
+        bot.send_message(user_id, ai_reply)
     except Exception as e:
-        print("Javob yuborish xato:", e)
+        print("[JAVOB YUBORISH XATO]", e)
 
-# ================== Webhook ==================
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return '', 200
-    return 'Invalid', 403
-
-@app.route('/')
-def index():
-    return "Grok AI bot ishlayapti! Admin: /setprompt"
-
-# ================== Run ==================
+# ================== Run Bot ==================
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 10000))
-    print(f"Grok bot ishlayapti... Listening on 0.0.0.0:{port}")
-    app.run(host='0.0.0.0', port=port)
+    print("Bot long polling bilan ishlayapti (multi-turn)...")
+    bot.infinity_polling()
